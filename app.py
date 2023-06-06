@@ -36,12 +36,12 @@ def is_transaction_legal(date, buy_or_sell, stock_code, shares, price):
                     if own_shares >= shares:
                         return True
                 else:
-                    raise Exception("buy_or_sell not 1 or -1")
+                    Exception("buy_or_sell not 1 or -1")
                 return "buy_or_sell not 1 or -1"
         conn.commit()
         conn.close()
     except Exception as e:
-        raise
+        print(e)
 
 def get_buy_or_sell(buy_or_sell, close):
     buy_points = []
@@ -89,7 +89,7 @@ def get_date():
             result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=float)
             result_df.index.name = 'Date'
             result_df.index = pd.to_datetime(result_df.index)
-            result_df = result_df.to_json(orient="columns")
+            result_df = result_df.to_json(orient="table")
 
             print(result_df)
             return result_df
@@ -97,7 +97,7 @@ def get_date():
 
     except Exception as e:
         print(e)
-        raise
+        
 
 @app.route('/initial_account', methods=['POST'])
 def initialize_account():
@@ -113,7 +113,7 @@ def initialize_account():
         return "Init sucessful account"
     except Exception as e:
         print(e)
-        raise
+        
 
 @app.route('/recordTransaction', methods=['POST'])
 def record_transaction():
@@ -144,9 +144,48 @@ def record_transaction():
         
     except Exception as e:
         print(e)
-        raise
+        
 
 
+@app.route('/Transaction', methods=['GET'])
+def show_transactions():
+    try:
+        with conn.cursor() as cursor:
+            command = f"select * from stock_transactions"
+            cursor.execute(command)
+            result = cursor.fetchall()
+            result = np.array(result)
+
+            column_names = ['Date', 'Buy_or_sell', 'Stock_code', 'Stock_price', 'Shares', 'Remain_cash']
+            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=str)
+            result_df.index.name = 'ID'
+            result_df = result_df.to_json(orient="table")
+            print(result_df)
+        conn.commit()
+        return result_df
+    except Exception as e:
+        print(e)
+        return str(e)
+
+@app.route('/holding_stock', methods=['GET'])
+def show_holdings():
+    try:
+        with conn.cursor() as cursor:
+            command = f"select stock_code, sum(shares) as shares from stock_transactions where id != 0 group by stock_code"
+            cursor.execute(command)
+            result = cursor.fetchall()
+            result = np.array(result)
+
+            column_names = ['shares']
+            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=float)
+            result_df.index.name = 'stock_code'
+            result_df = result_df.to_json(orient="table")
+            print(result_df)
+        conn.commit()
+        return result_df
+    except Exception as e:
+        print(e)
+        return str(e)
 
 if __name__ == '__main__':
     app.debug = True
