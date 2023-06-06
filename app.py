@@ -42,6 +42,7 @@ def is_transaction_legal(date, buy_or_sell, stock_code, shares, price):
         conn.close()
     except Exception as e:
         print(e)
+        return e;
 
 def get_buy_or_sell(buy_or_sell, close):
     buy_points = []
@@ -77,6 +78,7 @@ def hello():
 @app.route('/get_stock', methods=['POST'])
 def get_date():
     data = request.json
+    print("start getting stock ................")
     try:
         with conn.cursor() as cursor:
             date = '\'' + data["date"] +'\''
@@ -92,11 +94,12 @@ def get_date():
             result_df = result_df.to_json(orient="table")
 
             print(result_df)
-            return result_df
+            
         conn.commit()
-
+        return result_df
     except Exception as e:
         print(e)
+        return e
         
 
 @app.route('/initial_account', methods=['POST'])
@@ -182,6 +185,43 @@ def show_holdings():
             result_df = result_df.to_json(orient="table")
             print(result_df)
         conn.commit()
+        return result_df
+    except Exception as e:
+        print(e)
+        return str(e)
+
+
+'''
+    顯示手上所有持有股票和股數
+'''
+@app.route('/simulate', methods=['POST'])
+def simulate():
+    print("simulating")
+    data = request.json
+    stock_code = data['stock_code']
+    initial_money = data['initial_money']
+    start_date = data['start_date']
+    try:
+        with conn.cursor() as cursor:
+            stock_code = '\'' + str(stock_code) +'\''
+            start_date = '\'' + str(start_date) +'\''
+            command = f"TRUNCATE TABLE simulate; \
+                        INSERT INTO simulate (id, date, stock_code, stock_price, shares, buy_or_sell, remain_cash, total_value) values (0, {start_date}, NULL, NULL, NULL, 0, {initial_money}, {initial_money})\
+                        INSERT INTO simulate (id, date, stock_code, stock_price, shares, buy_or_sell, remain_cash, total_value) SELECT ROW_NUMBER()over(order by date asc)-1, date, {stock_code}, price, stock_num - Lag(stock_num)over(order by date asc), buy_or_sell, money, total_value FROM GB_Predict({stock_code}, {initial_money}, {start_date}) where buy_or_sell != 0;"
+            cursor.execute(command)
+            command = "select * from simulate"
+            cursor.execute(command)
+            result = cursor.fetchall()
+            result = np.array(result)
+
+            column_names = ['Date', 'Buy_or_sell', 'Stock_code', 'Stock_price', 'Shares', 'Remain_cash', 'Total_value']
+            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=str)
+            result_df.index.name = 'ID'
+
+            result_df = result_df.to_json(orient="table")
+            print(result_df)
+        conn.commit()
+
         return result_df
     except Exception as e:
         print(e)
