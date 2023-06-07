@@ -21,14 +21,14 @@ db_settings = {
     "charset": "utf8"
 }
 
-def is_transaction_legal(date, buy_or_sell, stock_code, shares, price):
+def is_transaction_legal(date, buy_or_sell, stock_code, shares):
     try:
         date = '\'' + date +'\''
         conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
-                command = f"select TOP(1) remain_cash as remain_cash, (select sum(buy_or_sell * shares) from stock_transactions where stock_code={stock_code}) as shares from stock_transactions order by id DESC"
+                command = f"select TOP(1) remain_cash as remain_cash, (SELECT c FROM dbo.股價資訊 WHERE date = {date} AND stock_code = {stock_code}) as price, (select sum(buy_or_sell * shares) from stock_transactions where stock_code={stock_code}) as shares from stock_transactions order by id DESC"
                 cursor.execute(command)
-                remain_cash, own_shares = cursor.fetchall()[0]
+                remain_cash, price, own_shares = cursor.fetchall()[0]
                 if buy_or_sell == 1:
                     if remain_cash >= price * shares:
                         return True
@@ -60,7 +60,7 @@ def get_buy_or_sell(buy_or_sell, close):
     return buy_points, sell_points
 
 
-conn = pymssql.connect(**db_settings)
+
 b = io.BytesIO()
 app = Flask(__name__)
 
@@ -80,6 +80,7 @@ def get_date():
     data = request.json
     print("start getting stock ................")
     try:
+        conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
             date = '\'' + data["date"] +'\''
             command = f"select * from datefind_stockcode({date})"
@@ -88,7 +89,7 @@ def get_date():
             result = np.array(result)
 
             column_names = ['Company', 'Buy_or_sell']
-            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=float)
+            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=str)
             result_df.index.name = 'Date'
             result_df.index = pd.to_datetime(result_df.index)
             result_df = result_df.to_json(orient="table")
@@ -108,6 +109,7 @@ def initialize_account():
     try:
         date = '\'' + data['date'] +'\''
         deposit = int(data['deposit'])
+        conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
             command = f"insert into stock_transactions(id, date, buy_or_sell ,remain_cash) values(0, {date}, 0,{deposit})"
             cursor.execute(command)
@@ -125,21 +127,21 @@ def record_transaction():
     buy_or_sell = data['buy_or_sell']
     stock_code = data['stock_code']
     shares = data['shares']
-    price = data['price']
     print(stock_code)
     stock_code = '\''+stock_code+'\''
     try:
-        if not is_transaction_legal(date, buy_or_sell, stock_code, shares, price):
+        conn = pymssql.connect(**db_settings)
+        if not is_transaction_legal(date, buy_or_sell, stock_code, shares):
             raise Exception("No enough cash or shares")
         with conn.cursor() as cursor:
             date = '\'' + date +'\''
             command = f"INSERT INTO stock_transactions (id, date, stock_code, stock_price, shares, buy_or_sell, remain_cash)\
                         SELECT MAX(id) + 1, {date}, {stock_code},\
-                               {price},\
+                               (SELECT c FROM dbo.股價資訊 WHERE date = {date} AND stock_code = {stock_code}),\
                                {shares},\
                                {buy_or_sell},\
                                ((SELECT TOP(1)remain_cash FROM stock_transactions ORDER BY id DESC) +\
-                                {buy_or_sell} * -1 *{price})\
+                                {buy_or_sell} * -1 * (SELECT c FROM dbo.股價資訊 WHERE date = {date} AND stock_code = {stock_code}) * {shares})\
                         FROM stock_transactions;"
             cursor.execute(command)
         conn.commit()
@@ -153,6 +155,7 @@ def record_transaction():
 @app.route('/Transaction', methods=['GET'])
 def show_transactions():
     try:
+        conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
             command = f"select * from stock_transactions"
             cursor.execute(command)
@@ -173,14 +176,15 @@ def show_transactions():
 @app.route('/holding_stock', methods=['GET'])
 def show_holdings():
     try:
+        conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
-            command = f"select stock_code, sum(shares) as shares from stock_transactions where id != 0 group by stock_code"
+            command = f"select stock_code, sum(shares * Buy_or_sell) as shares from stock_transactions where id != 0 group by stock_code"
             cursor.execute(command)
             result = cursor.fetchall()
             result = np.array(result)
 
             column_names = ['shares']
-            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=float)
+            result_df = pd.DataFrame(result[:,1:], columns=column_names, index=result[:,0], dtype=str)
             result_df.index.name = 'stock_code'
             result_df = result_df.to_json(orient="table")
             print(result_df)
@@ -202,6 +206,7 @@ def simulate():
     initial_money = data['initial_money']
     start_date = data['start_date']
     try:
+        conn = pymssql.connect(**db_settings)
         with conn.cursor() as cursor:
             stock_code = '\'' + str(stock_code) +'\''
             start_date = '\'' + str(start_date) +'\''
